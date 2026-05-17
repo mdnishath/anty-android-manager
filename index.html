@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CloudPhone Manager</title>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('cp.theme');
+          var resolved = stored;
+          if (!stored || stored === 'system') {
+            resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          var root = document.documentElement;
+          if (resolved === 'dark') {
+            root.classList.add('dark');
+          } else {
+            root.classList.remove('dark');
+          }
+          root.style.colorScheme = resolved;
+        } catch (e) {
+          /* keep default */
+        }
+      })();
+    </script>
+  </head>
+  <body class="bg-bg text-fg">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,39 @@
+appId: com.cloudphone.manager
+productName: CloudPhone Manager
+copyright: Copyright (c) 2026 CloudPhone Manager
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist-electron/**/*
+  - out/renderer/**/*
+  - package.json
+asar: true
+publish:
+  provider: github
+  channel: latest
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: CloudPhone-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  artifactName: CloudPhone-Setup-${version}.${ext}
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  artifactName: CloudPhone-${version}-${arch}.${ext}
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  artifactName: CloudPhone-${version}-${arch}.${ext}
