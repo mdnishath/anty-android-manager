@@ -4,6 +4,8 @@ import {
   sidecarStateSchema,
   settingsSnapshotSchema,
   type ErrorReport,
+  type LauncherInput,
+  type LauncherResult,
   type OpenDialogOpts,
   type SettingsSnapshot,
   type SidecarState,
@@ -95,6 +97,17 @@ const api = {
   async winIsMaximized(): Promise<boolean> {
     const result = await ipcRenderer.invoke(IPC_CHANNELS.winIsMaximized);
     return typeof result === 'boolean' ? result : false;
+  },
+  async launchScrcpy(input: LauncherInput): Promise<LauncherResult> {
+    const res = await ipcRenderer.invoke(IPC_CHANNELS.launchScrcpy, input);
+    return (res as LauncherResult) ?? { ok: false, error: 'no response' };
+  },
+  async launchAdbShell(input: LauncherInput): Promise<LauncherResult> {
+    const res = await ipcRenderer.invoke(IPC_CHANNELS.launchAdbShell, input);
+    return (res as LauncherResult) ?? { ok: false, error: 'no response' };
+  },
+  async closeTunnel(phoneId: string): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.closeTunnel, phoneId);
   },
   onMaximizedChanged(cb: (maximized: boolean) => void): () => void {
     const listener = (_e: unknown, raw: unknown) => {

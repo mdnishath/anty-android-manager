@@ -104,3 +104,25 @@ async def stop_phone(phone_id: str) -> ActionResponse:
 async def list_managed_containers():
     """Diagnostic — show every CP-managed container Docker knows about."""
     return {"containers": redroid.list_managed_containers()}
+
+
+@router.get("/{phone_id}/connection")
+async def phone_connection(phone_id: str):
+    """Return the bridge-network address ADB / scrcpy should target.
+
+    The host running the sidecar reaches the container directly at this IP.
+    Remote clients need an SSH tunnel.
+    """
+    phone = _phones.get(phone_id)
+    if not phone:
+        raise HTTPException(404, f"No such phone: {phone_id}")
+    info = redroid.container_status(phone_id)
+    if not info:
+        raise HTTPException(409, "Container not running — start the phone first")
+    return {
+        "phone_id": phone_id,
+        "phone_name": phone.name,
+        "container_ip": info.get("container_ip"),
+        "adb_port": info.get("adb_port", 5555),
+        "adb_endpoint": info.get("adb_endpoint"),
+    }

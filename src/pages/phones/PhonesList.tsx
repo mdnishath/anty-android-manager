@@ -34,8 +34,11 @@ import {
   startPhone as startPhoneApi,
   stopPhone as stopPhoneApi,
   deletePhone as deletePhoneApi,
+  getPhoneConnection,
+  getSidecarUrl,
   SidecarError,
 } from '@/api/sidecar';
+import { getCpSafe } from '@/ipc';
 import { useBackendState } from '@/hooks/useBackendState';
 import type { PhoneTemplate } from '@/data/phoneTemplates';
 
@@ -195,10 +198,78 @@ function PhoneCard({ phone }: { phone: PhoneInstance }) {
     remove(phone.id);
     toast.success(`${phone.name} deleted`);
   };
-  const onScrcpy = () =>
-    toast.info('scrcpy launch is not wired up yet', { description: 'Coming in the next step.' });
-  const onAdb = () =>
-    toast.info('ADB shell is not wired up yet', { description: 'Coming in the next step.' });
+  const onScrcpy = async () => {
+    const cp = getCpSafe();
+    if (!cp) {
+      toast.error('Launcher unavailable (Electron bridge missing)');
+      return;
+    }
+    if (!isRunning) {
+      toast.error('Start the phone first');
+      return;
+    }
+    try {
+      const conn = await getPhoneConnection(phone.id);
+      if (!conn.container_ip) {
+        toast.error('Container has no IP yet — wait a few seconds and retry');
+        return;
+      }
+      const sidecarUrl = await getSidecarUrl();
+      const t = toast.loading(`Opening scrcpy for ${phone.name}…`);
+      const res = await cp.launchScrcpy({
+        phoneId: phone.id,
+        phoneName: phone.name,
+        containerIp: conn.container_ip,
+        sidecarUrl,
+      });
+      toast.dismiss(t);
+      if (res.ok) {
+        toast.success(`scrcpy launched`, {
+          description: `Tunnel on 127.0.0.1:${res.localPort}`,
+        });
+      } else {
+        toast.error('scrcpy failed', { description: res.error });
+      }
+    } catch (err) {
+      toast.error('scrcpy failed', {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  const onAdb = async () => {
+    const cp = getCpSafe();
+    if (!cp) {
+      toast.error('Launcher unavailable (Electron bridge missing)');
+      return;
+    }
+    if (!isRunning) {
+      toast.error('Start the phone first');
+      return;
+    }
+    try {
+      const conn = await getPhoneConnection(phone.id);
+      if (!conn.container_ip) {
+        toast.error('Container has no IP yet — wait a few seconds and retry');
+        return;
+      }
+      const sidecarUrl = await getSidecarUrl();
+      const res = await cp.launchAdbShell({
+        phoneId: phone.id,
+        phoneName: phone.name,
+        containerIp: conn.container_ip,
+        sidecarUrl,
+      });
+      if (res.ok) {
+        toast.success('ADB shell opened in a new window');
+      } else {
+        toast.error('ADB shell failed', { description: res.error });
+      }
+    } catch (err) {
+      toast.error('ADB shell failed', {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
 
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-lg border border-border bg-bg-elev transition-colors hover:border-border-strong">

@@ -133,3 +133,22 @@ export async function deletePhone(id: string): Promise<ActionResponse> {
 export async function getPhone(id: string): Promise<PhoneInstance> {
   return sidecarFetch<PhoneInstance>(`/phones/${id}`);
 }
+
+export interface PhoneConnection {
+  phone_id: string;
+  phone_name: string;
+  container_ip: string | null;
+  adb_port: number;
+  adb_endpoint: string | null;
+}
+
+export async function getPhoneConnection(id: string): Promise<PhoneConnection> {
+  return sidecarFetch<PhoneConnection>(`/phones/${id}/connection`);
+}
+
+/** Best-effort URL of the sidecar, used by Electron launcher to build SSH command. */
+export async function getSidecarUrl(): Promise<string> {
+  const cp = (await import('@/ipc')).getCpSafe();
+  if (!cp) return '';
+  return cp.sidecarUrl();
+}

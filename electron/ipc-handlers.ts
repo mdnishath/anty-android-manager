@@ -9,7 +9,16 @@ import {
 } from '../shared/ipc-schemas';
 import { sidecar } from './sidecar';
 import { getAllSettings, setSetting, onChanged } from './settings-store';
+import { launchScrcpy, launchAdbShell, closeTunnel } from './launcher';
 import { z } from 'zod';
+
+const launcherInputSchema = z.object({
+  phoneId: z.string().min(1),
+  phoneName: z.string().default('Phone'),
+  containerIp: z.string().min(1),
+  sidecarUrl: z.string().min(1),
+  sshUser: z.string().optional(),
+});
 
 const setSettingArgSchema = z.object({
   key: settingsSnapshotSchema.keyof(),
@@ -101,6 +110,22 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.winIsMaximized, (e) => {
     return BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.launchScrcpy, async (_e, raw: unknown) => {
+    const parsed = launcherInputSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: 'Invalid launcher input' };
+    return launchScrcpy(parsed.data);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.launchAdbShell, async (_e, raw: unknown) => {
+    const parsed = launcherInputSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: 'Invalid launcher input' };
+    return launchAdbShell(parsed.data);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.closeTunnel, (_e, raw: unknown) => {
+    if (typeof raw === 'string') closeTunnel(raw);
   });
 
   // Push events to all renderers

@@ -77,4 +77,21 @@ export const IPC_CHANNELS = {
   winClose: 'cp:win:close',
   winIsMaximized: 'cp:win:isMaximized',
   winMaximizedEvent: 'cp:win:maximizedChanged',
+  launchScrcpy: 'cp:launch:scrcpy',
+  launchAdbShell: 'cp:launch:adbShell',
+  closeTunnel: 'cp:launch:closeTunnel',
 } as const;
+
+export interface LauncherInput {
+  phoneId: string;
+  phoneName: string;
+  containerIp: string;
+  sidecarUrl: string;
+  sshUser?: string;
+}
+
+export interface LauncherResult {
+  ok: boolean;
+  localPort?: number;
+  error?: string;
+}
