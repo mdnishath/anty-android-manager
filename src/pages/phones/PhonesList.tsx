@@ -209,6 +209,9 @@ function PhoneCard({ phone }: { phone: PhoneInstance }) {
       return;
     }
     try {
+      // Backend may have restarted and dropped its in-memory phone record;
+      // upsert first so /connection works.
+      await upsertPhone(phone).catch(() => undefined);
       const conn = await getPhoneConnection(phone.id);
       if (!conn.container_ip) {
         toast.error('Container has no IP yet — wait a few seconds and retry');
@@ -247,6 +250,7 @@ function PhoneCard({ phone }: { phone: PhoneInstance }) {
       return;
     }
     try {
+      await upsertPhone(phone).catch(() => undefined);
       const conn = await getPhoneConnection(phone.id);
       if (!conn.container_ip) {
         toast.error('Container has no IP yet — wait a few seconds and retry');
