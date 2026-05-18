@@ -15,7 +15,9 @@ Image selection (real mode):
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
+import time
 from dataclasses import dataclass
 
 import structlog
@@ -142,6 +144,9 @@ def build_cmd(phone: PhoneInstance) -> list[str]:
         f"androidboot.redroid_height={d.get('heightPx', 1920)}",
         f"androidboot.redroid_dpi={d.get('densityDpi', 420)}",
         "androidboot.use_memfd=1",
+        "androidboot.redroid_fps=60",
+        # guest = ANGLE software GPU — consistent & faster than pure sw on VPS
+        "androidboot.redroid_gpu_mode=guest",
     ]
 
 
@@ -170,6 +175,78 @@ def ensure_image(image: str, platform: str | None = None) -> None:
 
 def _use_simulated() -> bool:
     return probe_runtime().mode != "real"
+
+
+# ─── mac80211_hwsim WiFi injection ───────────────────────────────────────────
+
+_wifi_lock = threading.Lock()
+_HWSIM_RADIOS = 8  # pre-create this many virtual radios on first use
+
+
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def _host_phys() -> list[str]:
+    """List phy names visible in the host network namespace (e.g. ['phy0','phy1']).
+    Phys moved into container namespaces won't appear here.
+    """
+    r = _run(["iw", "phy"])
+    phys = []
+    for line in r.stdout.splitlines():
+        if line.startswith("Wiphy phy"):
+            phys.append(line.split()[1])
+    return phys
+
+
+def _ensure_hwsim() -> bool:
+    """Load mac80211_hwsim with enough pre-created radios. Idempotent."""
+    if os.path.exists("/sys/module/mac80211_hwsim"):
+        return True
+    r = _run(["modprobe", "mac80211_hwsim", f"radios={_HWSIM_RADIOS}"])
+    if r.returncode != 0:
+        log.warning("wifi.hwsim.load_failed", stderr=r.stderr.strip())
+        return False
+    time.sleep(0.5)  # let kernel create the interfaces
+    return True
+
+
+def inject_wifi(cname: str) -> bool:
+    """Move a mac80211_hwsim virtual radio into the container so Android's
+    WifiService gets a real wlan0 interface. Returns True on success.
+    """
+    try:
+        with _wifi_lock:
+            if not _ensure_hwsim():
+                return False
+
+            phys = _host_phys()
+            if not phys:
+                log.warning("wifi.inject.no_free_phy")
+                return False
+            phy = phys[0]  # take the first free phy
+
+            r = _run(["docker", "inspect", cname, "--format", "{{.State.Pid}}"])
+            pid = r.stdout.strip()
+            if not pid or pid == "0":
+                log.warning("wifi.inject.no_pid", container=cname)
+                return False
+
+            # Move the phy into the container's net namespace
+            r = _run(["iw", "phy", phy, "set", "netns", pid])
+            if r.returncode != 0:
+                log.warning("wifi.inject.move_failed", phy=phy, err=r.stderr.strip())
+                return False
+
+            time.sleep(0.3)
+            # Bring up wlan0 inside the container
+            _run(["nsenter", "-t", pid, "-n", "ip", "link", "set", "wlan0", "up"])
+
+            log.info("wifi.inject.ok", container=cname, phy=phy, pid=pid)
+            return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("wifi.inject.error", error=str(exc))
+        return False
 
 
 def start_container(phone: PhoneInstance, default_image: str | None = None):
@@ -230,6 +307,14 @@ def start_container(phone: PhoneInstance, default_image: str | None = None):
 
     container = client.containers.run(**kwargs)
     log.info("redroid.started", phone=phone.id, id=container.short_id, adb_port=host_port)
+
+    if phone.network.type == "wifi":
+        # Give Android a few seconds to start its network stack, then inject
+        def _wifi_later():
+            time.sleep(8)
+            inject_wifi(name)
+        threading.Thread(target=_wifi_later, daemon=True).start()
+
     return container
 
 

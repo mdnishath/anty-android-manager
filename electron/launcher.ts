@@ -14,6 +14,8 @@
 
 import { spawn, type ChildProcess, execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import net from 'node:net';
 import { URL } from 'node:url';
 import log from 'electron-log/main';
@@ -48,10 +50,12 @@ export interface LaunchInput {
   phoneId: string;
   phoneName: string;
   containerIp: string;
-  /** Sidecar URL, e.g. http://144.79.218.148:38080 — we tunnel through its host. */
+  /** Sidecar URL, e.g. http://51.159.152.233:38080 — we tunnel through its host. */
   sidecarUrl: string;
   /** SSH user, defaults to `root`. */
   sshUser?: string;
+  /** Network type to emulate inside the container after ADB connects. */
+  networkType?: 'wifi' | 'cellular';
 }
 
 export interface LaunchResult {
@@ -127,11 +131,23 @@ async function ensureTunnel(input: LaunchInput): Promise<Tunnel> {
   const user = input.sshUser ?? 'root';
   const localPort = pickPort();
   const adbServerPort = pickAdbServerPort();
+
+  // Pick the best available SSH identity key (prefer ed25519, fallback to rsa)
+  const sshDir = join(homedir(), '.ssh');
+  const identityArgs: string[] = [];
+  for (const keyFile of ['id_ed25519', 'id_rsa']) {
+    const p = join(sshDir, keyFile);
+    if (existsSync(p)) { identityArgs.push('-i', p); break; }
+  }
+
   const args = [
     '-N', // no remote command
     '-T', // no pty
+    ...identityArgs,
     '-o',
-    'StrictHostKeyChecking=accept-new',
+    'StrictHostKeyChecking=no',
+    '-o',
+    'UserKnownHostsFile=NUL',
     '-o',
     'ExitOnForwardFailure=yes',
     '-o',
@@ -184,6 +200,48 @@ function adbConnect(
   });
 }
 
+function adbShell(
+  adb: string,
+  serial: string,
+  adbServerPort: number,
+  cmd: string,
+): Promise<void> {
+  return new Promise((resolve) => {
+    execFile(
+      adb,
+      ['-s', serial, 'shell', cmd],
+      { windowsHide: true, env: adbEnv(adbServerPort), timeout: 8000 },
+      () => resolve(),
+    );
+  });
+}
+
+async function setupNetworkType(
+  adb: string,
+  serial: string,
+  adbServerPort: number,
+  networkType: 'wifi' | 'cellular',
+): Promise<void> {
+  if (networkType === 'wifi') {
+    // Rename eth0 → wlan0 so Android's ConnectivityService classifies it as WiFi
+    await adbShell(adb, serial, adbServerPort,
+      'ip link set eth0 down 2>/dev/null; ' +
+      'ip link set eth0 name wlan0 2>/dev/null; ' +
+      'ip link set wlan0 up 2>/dev/null; ' +
+      'ip route add default via $(ip route show | awk \'/default/{print $3;exit}\') dev wlan0 2>/dev/null; ' +
+      'true'
+    );
+    await adbShell(adb, serial, adbServerPort, 'setprop wifi.interface wlan0');
+    await adbShell(adb, serial, adbServerPort, 'setprop wlan.driver.status ok');
+    log.info('[launcher] network type → wifi (eth0 renamed to wlan0)');
+  } else if (networkType === 'cellular') {
+    await adbShell(adb, serial, adbServerPort, 'setprop gsm.network.type LTE');
+    await adbShell(adb, serial, adbServerPort, 'setprop gsm.operator.alpha "Mobile"');
+    await adbShell(adb, serial, adbServerPort, 'setprop gsm.sim.operator.alpha "Mobile"');
+    log.info('[launcher] network type → cellular (props set)');
+  }
+}
+
 // ────────────────────────────── public API ──────────────────────────────
 
 export async function launchScrcpy(input: LaunchInput): Promise<LaunchResult> {
@@ -195,6 +253,9 @@ export async function launchScrcpy(input: LaunchInput): Promise<LaunchResult> {
   try {
     const t = await ensureTunnel(input);
     await adbConnect(adb, '127.0.0.1', t.localPort, t.adbServerPort);
+    if (input.networkType) {
+      await setupNetworkType(adb, `127.0.0.1:${t.localPort}`, t.adbServerPort, input.networkType);
+    }
 
     const args = [
       '-s',
@@ -228,6 +289,9 @@ export async function launchAdbShell(input: LaunchInput): Promise<LaunchResult> 
   try {
     const t = await ensureTunnel(input);
     await adbConnect(adb, '127.0.0.1', t.localPort, t.adbServerPort);
+    if (input.networkType) {
+      await setupNetworkType(adb, `127.0.0.1:${t.localPort}`, t.adbServerPort, input.networkType);
+    }
     // Open a new cmd.exe window running adb shell so the user gets a terminal.
     // Setting ANDROID_ADB_SERVER_PORT in the window keeps it isolated from
     // other phones' adb sessions.

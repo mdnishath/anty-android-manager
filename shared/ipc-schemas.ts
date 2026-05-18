@@ -88,6 +88,7 @@ export interface LauncherInput {
   containerIp: string;
   sidecarUrl: string;
   sshUser?: string;
+  networkType?: 'wifi' | 'cellular';
 }
 
 export interface LauncherResult {

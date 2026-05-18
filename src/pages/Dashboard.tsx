@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
 import { usePhonesStore, type PhoneInstance } from '@/store/phones';
 import { useBackendState } from '@/hooks/useBackendState';
-import { fetchHealth, type HealthResponse } from '@/api/sidecar';
+import { fetchHealth, getSidecarUrl, type HealthResponse } from '@/api/sidecar';
 import type { SidecarState } from '@shared/ipc-schemas';
 
 export default function Dashboard() {
@@ -247,6 +247,14 @@ function useHealth(state: SidecarState): HealthResponse | null {
   return health;
 }
 
+function useSidecarUrl(state: SidecarState): string {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    if (state === 'ready') getSidecarUrl().then(setUrl).catch(() => setUrl(''));
+  }, [state]);
+  return url;
+}
+
 function BackendCard({ state, health }: { state: SidecarState; health: HealthResponse | null }) {
   const map: Record<SidecarState, { label: string; tone: 'success' | 'warning' | 'muted' | 'danger'; pulse?: boolean }> = {
     starting: { label: 'Starting', tone: 'warning', pulse: true },
@@ -255,6 +263,7 @@ function BackendCard({ state, health }: { state: SidecarState; health: HealthRes
     error: { label: 'Error', tone: 'danger' },
   };
   const info = map[state];
+  const url = useSidecarUrl(state);
   const toneClasses = {
     success: 'bg-success-bg text-success',
     warning: 'bg-warning-bg text-warning',
@@ -288,18 +297,25 @@ function BackendCard({ state, health }: { state: SidecarState; health: HealthRes
           : 'Sidecar process'}
       </div>
       {health && (
-        <div className="mt-2 flex items-center gap-1.5">
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-              health.runtime_mode === 'real' && 'bg-success-bg text-success',
-              health.runtime_mode === 'simulated' && 'bg-warning-bg text-warning',
-              health.runtime_mode === 'unavailable' && 'bg-danger-bg text-danger',
-            )}
-            title={health.runtime_reason}
-          >
-            {health.runtime_mode === 'real' ? '● Real containers' : health.runtime_mode === 'simulated' ? '◐ Simulated' : '○ Unavailable'}
-          </span>
+        <div className="mt-2 flex flex-col gap-1">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                health.runtime_mode === 'real' && 'bg-success-bg text-success',
+                health.runtime_mode === 'simulated' && 'bg-warning-bg text-warning',
+                health.runtime_mode === 'unavailable' && 'bg-danger-bg text-danger',
+              )}
+              title={health.runtime_reason}
+            >
+              {health.runtime_mode === 'real' ? '● Real containers' : health.runtime_mode === 'simulated' ? '◐ Simulated' : '○ Unavailable'}
+            </span>
+          </div>
+          {url && (
+            <div className="text-[10px] text-fg-muted truncate" title={url}>
+              {url.replace(/^https?:\/\//, '')}
+            </div>
+          )}
         </div>
       )}
     </div>

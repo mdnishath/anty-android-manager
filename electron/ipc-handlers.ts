@@ -18,6 +18,7 @@ const launcherInputSchema = z.object({
   containerIp: z.string().min(1),
   sidecarUrl: z.string().min(1),
   sshUser: z.string().optional(),
+  networkType: z.enum(['wifi', 'cellular']).optional(),
 });
 
 const setSettingArgSchema = z.object({

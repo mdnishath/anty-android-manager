@@ -224,6 +224,7 @@ function PhoneCard({ phone }: { phone: PhoneInstance }) {
         phoneName: phone.name,
         containerIp: conn.container_ip,
         sidecarUrl,
+        networkType: phone.network?.type,
       });
       toast.dismiss(t);
       if (res.ok) {
@@ -262,6 +263,7 @@ function PhoneCard({ phone }: { phone: PhoneInstance }) {
         phoneName: phone.name,
         containerIp: conn.container_ip,
         sidecarUrl,
+        networkType: phone.network?.type,
       });
       if (res.ok) {
         toast.success('ADB shell opened in a new window');
