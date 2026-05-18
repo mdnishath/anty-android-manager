@@ -217,13 +217,12 @@ def start_container(phone: PhoneInstance, default_image: str | None = None):
         "remove": False,
         "labels": build_labels(phone),
         "environment": build_env(phone),
-        "ports": {"5555/tcp": ("127.0.0.1", host_port)},
+        # No host port mapping — Docker's iptables NAT chain on Ubuntu+nftables
+        # rejects `--to-destination`. We expose the container's bridge IP via
+        # `container_status()` instead; callers SSH-tunnel `<bridge-ip>:5555`.
         "command": build_cmd(phone),
-        # Best-effort caps. Real isolation comes from cgroups + redroid's own
-        # internal limits.
         "mem_limit": f"{ram_gb}g",
         "nano_cpus": int(cores * 1e9),
-        # Bind-mount the host's binderfs so redroid can find /dev/binder*.
         "volumes": {"/dev/binderfs": {"bind": "/dev/binderfs", "mode": "rw"}},
     }
     if choice.platform:
@@ -273,13 +272,23 @@ def container_status(phone_id: str) -> dict | None:
         return None
     container.reload()
     state = container.attrs.get("State", {})
+    networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+    # Pick the first non-empty IP from any attached network.
+    bridge_ip = None
+    for net in networks.values():
+        ip = net.get("IPAddress")
+        if ip:
+            bridge_ip = ip
+            break
     return {
         "id": container.short_id,
         "name": container.name,
         "image": container.attrs.get("Config", {}).get("Image"),
         "status": state.get("Status"),
         "started_at": state.get("StartedAt"),
-        "adb_port": _allocations.get(phone_id),
+        "adb_endpoint": f"{bridge_ip}:5555" if bridge_ip else None,
+        "container_ip": bridge_ip,
+        "adb_port": 5555,
     }
 
 
