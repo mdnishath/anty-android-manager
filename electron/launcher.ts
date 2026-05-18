@@ -22,6 +22,8 @@ import { app, shell } from 'electron';
 interface Tunnel {
   process: ChildProcess;
   localPort: number;
+  /** Per-phone ADB server port — isolates scrcpy/adb sessions across phones. */
+  adbServerPort: number;
   containerIp: string;
   remoteHost: string;
   user: string;
@@ -29,6 +31,7 @@ interface Tunnel {
 
 const tunnels = new Map<string, Tunnel>();
 let nextLocalPort = 15555;
+let nextAdbServerPort = 5050; // 5037 is the default adb server port — start above it
 
 /** Where to look for scrcpy.exe / adb.exe on Windows. */
 const SCRCPY_HINTS = [
@@ -69,6 +72,15 @@ function resolveBinary(hints: string[]): string | null {
 
 function pickPort(): number {
   return nextLocalPort++;
+}
+
+function pickAdbServerPort(): number {
+  return nextAdbServerPort++;
+}
+
+/** Env for adb / scrcpy calls so each phone uses its own dedicated adb server. */
+function adbEnv(adbServerPort: number): NodeJS.ProcessEnv {
+  return { ...process.env, ANDROID_ADB_SERVER_PORT: String(adbServerPort) };
 }
 
 async function waitForListening(port: number, timeoutMs = 8000): Promise<boolean> {
@@ -114,6 +126,7 @@ async function ensureTunnel(input: LaunchInput): Promise<Tunnel> {
   }
   const user = input.sshUser ?? 'root';
   const localPort = pickPort();
+  const adbServerPort = pickAdbServerPort();
   const args = [
     '-N', // no remote command
     '-T', // no pty
@@ -127,7 +140,7 @@ async function ensureTunnel(input: LaunchInput): Promise<Tunnel> {
     `${localPort}:${input.containerIp}:5555`,
     `${user}@${remoteHost}`,
   ];
-  log.info(`[launcher] ssh ${args.join(' ')}`);
+  log.info(`[launcher] ssh ${args.join(' ')} (adbServerPort=${adbServerPort})`);
   const proc = spawn('ssh', args, { windowsHide: true, stdio: 'ignore' });
   proc.on('exit', (code) => {
     log.info(`[launcher] tunnel for ${input.phoneId} exited code=${code}`);
@@ -143,14 +156,31 @@ async function ensureTunnel(input: LaunchInput): Promise<Tunnel> {
     }
     throw new Error(`SSH tunnel to ${remoteHost} did not come up within 10s`);
   }
-  const t: Tunnel = { process: proc, localPort, containerIp: input.containerIp, remoteHost, user };
+  const t: Tunnel = {
+    process: proc,
+    localPort,
+    adbServerPort,
+    containerIp: input.containerIp,
+    remoteHost,
+    user,
+  };
   tunnels.set(input.phoneId, t);
   return t;
 }
 
-function adbConnect(adb: string, host: string, port: number): Promise<void> {
+function adbConnect(
+  adb: string,
+  host: string,
+  port: number,
+  adbServerPort: number,
+): Promise<void> {
   return new Promise((resolve) => {
-    execFile(adb, ['connect', `${host}:${port}`], { windowsHide: true }, () => resolve());
+    execFile(
+      adb,
+      ['connect', `${host}:${port}`],
+      { windowsHide: true, env: adbEnv(adbServerPort) },
+      () => resolve(),
+    );
   });
 }
 
@@ -164,7 +194,7 @@ export async function launchScrcpy(input: LaunchInput): Promise<LaunchResult> {
 
   try {
     const t = await ensureTunnel(input);
-    await adbConnect(adb, '127.0.0.1', t.localPort);
+    await adbConnect(adb, '127.0.0.1', t.localPort, t.adbServerPort);
 
     const args = [
       '-s',
@@ -174,8 +204,15 @@ export async function launchScrcpy(input: LaunchInput): Promise<LaunchResult> {
       '--max-size',
       '900',
     ];
-    log.info(`[launcher] ${scrcpy} ${args.join(' ')}`);
-    const proc = spawn(scrcpy, args, { detached: true, stdio: 'ignore', windowsHide: false });
+    log.info(
+      `[launcher] ${scrcpy} ${args.join(' ')} (ANDROID_ADB_SERVER_PORT=${t.adbServerPort})`,
+    );
+    const proc = spawn(scrcpy, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+      env: adbEnv(t.adbServerPort),
+    });
     proc.unref();
     return { ok: true, localPort: t.localPort };
   } catch (err) {
@@ -190,13 +227,24 @@ export async function launchAdbShell(input: LaunchInput): Promise<LaunchResult> 
   if (!adb) return { ok: false, error: 'adb not found in PATH' };
   try {
     const t = await ensureTunnel(input);
-    await adbConnect(adb, '127.0.0.1', t.localPort);
+    await adbConnect(adb, '127.0.0.1', t.localPort, t.adbServerPort);
     // Open a new cmd.exe window running adb shell so the user gets a terminal.
-    const cmd =
-      process.platform === 'win32'
-        ? ['cmd.exe', '/c', 'start', '"' + (input.phoneName || 'ADB') + '"', 'cmd', '/k', `"${adb}" -s 127.0.0.1:${t.localPort} shell`]
-        : ['x-terminal-emulator', '-e', `${adb} -s 127.0.0.1:${t.localPort} shell`];
-    spawn(cmd[0]!, cmd.slice(1), { detached: true, stdio: 'ignore', shell: false }).unref();
+    // Setting ANDROID_ADB_SERVER_PORT in the window keeps it isolated from
+    // other phones' adb sessions.
+    if (process.platform === 'win32') {
+      const inner = `set ANDROID_ADB_SERVER_PORT=${t.adbServerPort} && "${adb}" -s 127.0.0.1:${t.localPort} shell`;
+      spawn('cmd.exe', ['/c', 'start', `"${input.phoneName || 'ADB'}"`, 'cmd', '/k', inner], {
+        detached: true,
+        stdio: 'ignore',
+        shell: false,
+      }).unref();
+    } else {
+      spawn(
+        'x-terminal-emulator',
+        ['-e', `${adb} -s 127.0.0.1:${t.localPort} shell`],
+        { detached: true, stdio: 'ignore', shell: false, env: adbEnv(t.adbServerPort) },
+      ).unref();
+    }
     return { ok: true, localPort: t.localPort };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -209,6 +257,17 @@ export async function launchAdbShell(input: LaunchInput): Promise<LaunchResult> 
 export function closeTunnel(phoneId: string): void {
   const t = tunnels.get(phoneId);
   if (!t) return;
+  // Best-effort: kill the per-phone adb server so it doesn't linger.
+  const adb = resolveBinary(ADB_HINTS);
+  if (adb) {
+    try {
+      execFile(adb, ['kill-server'], { windowsHide: true, env: adbEnv(t.adbServerPort) }, () => {
+        /* ignore result */
+      });
+    } catch {
+      /* ignore */
+    }
+  }
   try {
     t.process.kill();
   } catch {
