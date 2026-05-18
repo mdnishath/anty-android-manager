@@ -2,7 +2,7 @@
   "name": "cloudphone-manager",
   "version": "0.1.0",
   "description": "Local desktop app to create, configure, and operate many virtual Android phones",
-  "main": "dist-electron/main.js",
+  "main": "out/main/main.js",
   "type": "module",
   "private": true,
   "author": "CloudPhone Manager",

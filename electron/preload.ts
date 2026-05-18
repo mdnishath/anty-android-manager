@@ -1,10 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
-  appInfoSchema,
   sidecarStateSchema,
   settingsSnapshotSchema,
-  type AppInfo,
   type ErrorReport,
   type OpenDialogOpts,
   type SettingsSnapshot,
@@ -14,24 +12,14 @@ import {
 declare const __APP_VERSION__: string;
 declare const __COMMIT__: string;
 
-async function buildInitial(): Promise<SettingsSnapshot> {
-  const raw = await ipcRenderer.invoke(IPC_CHANNELS.getAllSettings);
-  const parsed = settingsSnapshotSchema.safeParse(raw);
-  if (!parsed.success) throw new Error('Invalid initial settings from main');
-  return parsed.data;
-}
-
-const initialSettings = await buildInitial();
-
-const appInfo: AppInfo = appInfoSchema.parse({
+const appInfo = {
   version: __APP_VERSION__,
   commit: __COMMIT__,
   platform: process.platform,
   electron: process.versions.electron ?? '',
   chrome: process.versions.chrome ?? '',
   node: process.versions.node ?? '',
-  initialSettings,
-});
+};
 
 const api = {
   app: appInfo,
@@ -40,6 +28,11 @@ const api = {
     if (typeof url !== 'string') throw new Error('Invalid sidecar URL');
     return url;
   },
+  async sidecarState(): Promise<SidecarState> {
+    const raw = await ipcRenderer.invoke(IPC_CHANNELS.sidecarState);
+    const parsed = sidecarStateSchema.safeParse(raw);
+    return parsed.success ? parsed.data : 'starting';
+  },
   onSidecarState(cb: (s: SidecarState) => void): () => void {
     const listener = (_e: unknown, raw: unknown) => {
       const parsed = sidecarStateSchema.safeParse(raw);
@@ -47,6 +40,10 @@ const api = {
     };
     ipcRenderer.on(IPC_CHANNELS.sidecarStateEvent, listener);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.sidecarStateEvent, listener);
+  },
+  async sidecarToken(): Promise<string> {
+    const token = await ipcRenderer.invoke(IPC_CHANNELS.sidecarToken);
+    return typeof token === 'string' ? token : '';
   },
   async restartSidecar(): Promise<void> {
     await ipcRenderer.invoke(IPC_CHANNELS.restartSidecar);
@@ -82,6 +79,29 @@ const api = {
   },
   async reportError(payload: ErrorReport): Promise<void> {
     await ipcRenderer.invoke(IPC_CHANNELS.reportError, payload);
+  },
+  async winMinimize(): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.winMinimize);
+  },
+  async winMaximize(): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.winMaximize);
+  },
+  async winUnmaximize(): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.winUnmaximize);
+  },
+  async winClose(): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.winClose);
+  },
+  async winIsMaximized(): Promise<boolean> {
+    const result = await ipcRenderer.invoke(IPC_CHANNELS.winIsMaximized);
+    return typeof result === 'boolean' ? result : false;
+  },
+  onMaximizedChanged(cb: (maximized: boolean) => void): () => void {
+    const listener = (_e: unknown, raw: unknown) => {
+      if (typeof raw === 'boolean') cb(raw);
+    };
+    ipcRenderer.on(IPC_CHANNELS.winMaximizedEvent, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.winMaximizedEvent, listener);
   },
 };
 

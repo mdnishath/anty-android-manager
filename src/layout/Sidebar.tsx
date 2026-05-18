@@ -13,6 +13,8 @@ import {
   PanelLeftClose,
   CircleUser,
 } from 'lucide-react';
+import { getCpSafe } from '@/ipc';
+import { Kbd } from '@/components/ui/Kbd';
 import { useUiStore } from '@/store/ui';
 import { useShortcut } from '@/hooks/useShortcut';
 import { useReducedMotionSafe } from '@/hooks/useReducedMotionSafe';
@@ -20,7 +22,7 @@ import { useBackendState } from '@/hooks/useBackendState';
 import { useEffect } from 'react';
 import { SidebarNavItem } from './SidebarNavItem';
 import { IconButton } from '@/components/ui/IconButton';
-import { TooltipProvider } from '@/components/ui/Tooltip';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { BackendStateDot } from '@/components/BackendStateDot';
 import { cn } from '@/lib/cn';
 
@@ -38,44 +40,53 @@ export function Sidebar() {
 
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth < 900 && !collapsed) setCollapsed(true);
+      if (window.innerWidth < 700 && !collapsed) setCollapsed(true);
     };
-    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <motion.aside
-        animate={{ width: collapsed ? W_COLLAPSED : W_EXPANDED }}
-        transition={reduced ? { duration: 0 } : { duration: 0.2, ease: 'easeOut' }}
-        className="flex h-full shrink-0 flex-col border-r border-border bg-bg-elev"
-        aria-label="Primary"
-      >
-        <div className="flex h-12 items-center justify-between px-3">
-          <motion.div
-            animate={{ opacity: collapsed ? 0 : 1 }}
-            transition={reduced ? { duration: 0 } : { duration: 0.15 }}
-            className={cn('flex items-center gap-2 overflow-hidden', collapsed && 'pointer-events-none')}
-          >
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent text-accent-fg">
-              <Smartphone className="h-4 w-4" />
+    <motion.aside
+      animate={{ width: collapsed ? W_COLLAPSED : W_EXPANDED }}
+      transition={reduced ? { duration: 0 } : { duration: 0.2, ease: 'easeOut' }}
+      className="flex h-full shrink-0 flex-col border-r border-border bg-bg-elev"
+      aria-label="Primary"
+    >
+        {collapsed ? (
+          <div className="flex flex-col items-center gap-1.5 py-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent-strong text-accent-fg shadow-sm">
+              <Smartphone className="h-[18px] w-[18px]" strokeWidth={2.25} />
             </div>
-            <span className="truncate text-sm font-semibold tracking-tight">CloudPhone</span>
-          </motion.div>
-          <IconButton
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-expanded={!collapsed}
-            onClick={toggle}
-            size="sm"
-          >
-            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </IconButton>
-        </div>
+            <Tooltip content={<span className="flex items-center gap-1.5">Expand <Kbd>Ctrl B</Kbd></span>} side="right">
+              <IconButton aria-label="Expand sidebar" aria-expanded={false} onClick={toggle} size="sm">
+                <PanelLeft className="h-4 w-4" />
+              </IconButton>
+            </Tooltip>
+          </div>
+        ) : (
+          <div className="flex h-14 items-center justify-between gap-2 px-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent-strong text-accent-fg shadow-sm">
+                <Smartphone className="h-[18px] w-[18px]" strokeWidth={2.25} />
+              </div>
+              <div className="flex min-w-0 flex-col leading-tight">
+                <span className="truncate text-sm font-semibold tracking-tight text-fg">CloudPhone</span>
+                <span className="truncate text-[10px] text-fg-subtle">v{getCpSafe()?.app.version ?? '0.1.0'}</span>
+              </div>
+            </div>
+            <Tooltip content={<span className="flex items-center gap-1.5">Collapse <Kbd>Ctrl B</Kbd></span>} side="bottom">
+              <IconButton aria-label="Collapse sidebar" aria-expanded={true} onClick={toggle} size="sm">
+                <PanelLeftClose className="h-4 w-4" />
+              </IconButton>
+            </Tooltip>
+          </div>
+        )}
 
-        <nav className="flex-1 overflow-y-auto px-2 pb-2">
+        <nav
+          className={cn('sidebar-nav flex-1 overflow-y-auto pb-2', collapsed ? 'px-0' : 'px-2')}
+        >
           <SidebarSection label="Main" collapsed={collapsed}>
             <SidebarNavItem icon={LayoutDashboard} label="Dashboard" to="/dashboard" collapsed={collapsed} preloadId="dashboard" />
             <SidebarNavItem icon={Smartphone} label="Phones" to="/phones" collapsed={collapsed} preloadId="phones" />
@@ -107,7 +118,6 @@ export function Sidebar() {
           </div>
         </div>
       </motion.aside>
-    </TooltipProvider>
   );
 }
 
@@ -121,9 +131,11 @@ function SidebarSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mt-4 first:mt-2">
-      {!collapsed && (
-        <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">
+    <div className="mt-5 first:mt-3">
+      {collapsed ? (
+        <div className="mb-1.5 mx-2 h-px bg-border" />
+      ) : (
+        <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-subtle">
           {label}
         </div>
       )}

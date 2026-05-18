@@ -1,0 +1,302 @@
+"""redroid container lifecycle helpers — facade over real Docker and a
+simulated runtime. The chosen mode is decided at startup by `runtime.probe_runtime`.
+
+Real path: spins up a redroid container per phone with the right build props,
+ADB port forward and resource limits.
+
+Simulated path: in-memory fake containers with realistic timing so the UI
+flows still work on Windows hosts without a binder-capable kernel.
+
+Image selection (real mode):
+- amd64 host  → `redroid/redroid:<v>_64only-latest`  (native, fast)
+- arm64 host  → same multi-arch tag with platform="linux/arm64" via QEMU
+"""
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass
+
+import structlog
+
+from . import simulated
+from .docker_client import docker_client
+from .runtime import probe_runtime
+from .schemas import PhoneInstance
+
+log = structlog.get_logger(__name__)
+
+# ADB host port pool — each running container gets one.
+ADB_PORT_START = 5555
+ADB_PORT_END = 5755  # ~200 simultaneous containers
+_port_lock = threading.Lock()
+_allocations: dict[str, int] = {}  # phone_id → host_port
+
+
+def _allocate_port(phone_id: str) -> int:
+    with _port_lock:
+        if phone_id in _allocations:
+            return _allocations[phone_id]
+        used = set(_allocations.values())
+        for port in range(ADB_PORT_START, ADB_PORT_END + 1):
+            if port not in used:
+                _allocations[phone_id] = port
+                return port
+        raise RuntimeError("ADB port pool exhausted")
+
+
+def _release_port(phone_id: str) -> None:
+    with _port_lock:
+        _allocations.pop(phone_id, None)
+
+
+def container_name(phone_id: str) -> str:
+    return f"cp-{phone_id}"
+
+
+@dataclass
+class ImageChoice:
+    image: str
+    platform: str | None  # e.g. "linux/arm64" for QEMU emulation
+
+
+def choose_image(phone: PhoneInstance, default_image: str | None = None) -> ImageChoice:
+    """Pick a redroid image. `default_image` is the override from app settings.
+
+    redroid tags are multi-arch (e.g. `14.0.0_64only` has both amd64 and arm64
+    manifests). The `platform` flag picks the arm64 variant under QEMU when the
+    phone's target ABI is arm64.
+    """
+    # Map Android version → image tag. `_64only` = 64-bit only ABI (smaller,
+    # faster boot than the multi-ABI variant).
+    version = phone.templateSnapshot.android.get("version", "14")
+    base = {
+        "16": "redroid/redroid:16.0.0_64only-latest",
+        "15": "redroid/redroid:15.0.0_64only-latest",
+        "14": "redroid/redroid:14.0.0_64only-latest",
+        "13": "redroid/redroid:13.0.0_64only-latest",
+        "12": "redroid/redroid:12.0.0_64only-latest",
+        "11": "redroid/redroid:11.0.0_64only-latest",
+    }.get(str(version), "redroid/redroid:14.0.0_64only-latest")
+
+    image = default_image or base
+    platform = "linux/arm64" if phone.abi == "arm64-v8a" else "linux/amd64"
+    return ImageChoice(image=image, platform=platform)
+
+
+def build_env(phone: PhoneInstance) -> dict[str, str]:
+    """Build props that redroid forwards into `getprop`. Mirrors the fingerprint
+    fields the frontend already collects.
+    """
+    t = phone.templateSnapshot
+    b = t.build
+    a = t.android
+    return {
+        "ro.product.brand": str(b.get("productBrand", t.brand)),
+        "ro.product.manufacturer": str(b.get("manufacturer", t.brand)),
+        "ro.product.model": str(b.get("productModel", t.model)),
+        "ro.product.name": str(b.get("productName", "")),
+        "ro.product.device": str(b.get("productDevice", "")),
+        "ro.serialno": phone.identity.serialNumber,
+        "ro.build.fingerprint": str(b.get("fingerprint", "")),
+        "ro.build.id": str(a.get("buildId", "")),
+        "ro.build.version.release": str(a.get("version", "14")),
+        "ro.build.version.sdk": str(a.get("apiLevel", 34)),
+        "ro.build.version.security_patch": str(a.get("securityPatch", "")),
+        "ro.build.display.id": phone.identity.buildNumber,
+        # Network / locale
+        "persist.sys.timezone": phone.location.timezone,
+        "persist.sys.locale": phone.location.language,
+    }
+
+
+def build_cmd(phone: PhoneInstance) -> list[str]:
+    """Cmdline args appended after the image name — redroid reads `androidboot.*`."""
+    d = phone.templateSnapshot.display
+    return [
+        f"androidboot.redroid_width={d.get('widthPx', 1080)}",
+        f"androidboot.redroid_height={d.get('heightPx', 1920)}",
+        f"androidboot.redroid_dpi={d.get('densityDpi', 420)}",
+        "androidboot.use_memfd=1",
+    ]
+
+
+def build_labels(phone: PhoneInstance) -> dict[str, str]:
+    return {
+        "cp.phone": phone.id,
+        "cp.template": phone.templateId,
+        "cp.name": phone.name,
+        "cp.brand": phone.templateSnapshot.brand,
+    }
+
+
+def ensure_image(image: str, platform: str | None = None) -> None:
+    """Pull image if it isn't already present."""
+    client = docker_client.client
+    if client is None:
+        raise RuntimeError("Docker not available")
+    try:
+        client.images.get(image)
+        return
+    except Exception:  # noqa: BLE001
+        log.info("redroid.image.pulling", image=image, platform=platform)
+        client.images.pull(image, platform=platform)
+        log.info("redroid.image.pulled", image=image)
+
+
+def _use_simulated() -> bool:
+    return probe_runtime().mode != "real"
+
+
+def start_container(phone: PhoneInstance, default_image: str | None = None):
+    """Idempotent. If a container with this phone's name already exists, return it."""
+    if _use_simulated():
+        return simulated.start_container(phone, default_image)
+
+    client = docker_client.client
+    if client is None:
+        raise RuntimeError("Docker not available")
+
+    name = container_name(phone.id)
+    existing = _find_container(name)
+    if existing is not None:
+        if existing.status != "running":
+            existing.start()
+        return existing
+
+    choice = choose_image(phone, default_image)
+    ensure_image(choice.image, choice.platform)
+
+    host_port = _allocate_port(phone.id)
+    log.info(
+        "redroid.starting",
+        phone=phone.id,
+        name=name,
+        image=choice.image,
+        platform=choice.platform,
+        adb=host_port,
+    )
+
+    kwargs: dict = {
+        "image": choice.image,
+        "name": name,
+        "detach": True,
+        "privileged": True,
+        "tty": True,
+        "stdin_open": True,
+        "remove": False,
+        "labels": build_labels(phone),
+        "environment": build_env(phone),
+        "ports": {"5555/tcp": ("127.0.0.1", host_port)},
+        "command": build_cmd(phone),
+        # Memory + CPU caps based on the phone's ramGb (best-effort).
+        "mem_limit": f"{phone.ramGb}g",
+        "nano_cpus": int(phone.templateSnapshot.cpu.get("cores", 4) * 1e9),
+    }
+    if choice.platform:
+        kwargs["platform"] = choice.platform
+
+    container = client.containers.run(**kwargs)
+    log.info("redroid.started", phone=phone.id, id=container.short_id, adb_port=host_port)
+    return container
+
+
+def stop_container(phone_id: str) -> bool:
+    """Returns True if there was a container to stop."""
+    if _use_simulated():
+        return simulated.stop_container(phone_id)
+    container = _find_container(container_name(phone_id))
+    if container is None:
+        _release_port(phone_id)
+        return False
+    log.info("redroid.stopping", phone=phone_id, id=container.short_id)
+    try:
+        container.stop(timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("redroid.stop.error", phone=phone_id, error=str(exc))
+    return True
+
+
+def remove_container(phone_id: str, force: bool = True) -> bool:
+    if _use_simulated():
+        return simulated.remove_container(phone_id, force)
+    container = _find_container(container_name(phone_id))
+    if container is None:
+        _release_port(phone_id)
+        return False
+    log.info("redroid.removing", phone=phone_id, id=container.short_id)
+    try:
+        container.remove(force=force)
+    finally:
+        _release_port(phone_id)
+    return True
+
+
+def container_status(phone_id: str) -> dict | None:
+    if _use_simulated():
+        return simulated.container_status(phone_id)
+    container = _find_container(container_name(phone_id))
+    if container is None:
+        return None
+    container.reload()
+    state = container.attrs.get("State", {})
+    return {
+        "id": container.short_id,
+        "name": container.name,
+        "image": container.attrs.get("Config", {}).get("Image"),
+        "status": state.get("Status"),
+        "started_at": state.get("StartedAt"),
+        "adb_port": _allocations.get(phone_id),
+    }
+
+
+def list_managed_containers() -> list[dict]:
+    """Return all containers we created (filtered by label)."""
+    if _use_simulated():
+        return simulated.list_managed_containers()
+    client = docker_client.client
+    if client is None:
+        return []
+    try:
+        containers = client.containers.list(all=True, filters={"label": "cp.phone"})
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for c in containers:
+        labels = c.labels or {}
+        phone_id = labels.get("cp.phone")
+        out.append(
+            {
+                "id": c.short_id,
+                "name": c.name,
+                "phone_id": phone_id,
+                "status": c.status,
+                "adb_port": _allocations.get(phone_id) if phone_id else None,
+                "template_id": labels.get("cp.template"),
+                "phone_name": labels.get("cp.name"),
+            }
+        )
+    return out
+
+
+def _find_container(name: str):
+    client = docker_client.client
+    if client is None:
+        return None
+    try:
+        return client.containers.get(name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def map_status_to_phone(docker_status: str | None) -> str:
+    """Translate Docker container status → PhoneStatus."""
+    if _use_simulated():
+        return simulated.map_status_to_phone(docker_status)
+    if docker_status in ("running",):
+        return "running"
+    if docker_status in ("created", "restarting"):
+        return "starting"
+    if docker_status in ("dead",):
+        return "error"
+    return "stopped"

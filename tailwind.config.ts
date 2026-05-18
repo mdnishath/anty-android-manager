@@ -16,6 +16,7 @@ const config: Config = {
         'fg-subtle': 'hsl(var(--fg-subtle) / <alpha-value>)',
         accent: {
           DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
+          strong: 'hsl(var(--accent-strong) / <alpha-value>)',
           fg: 'hsl(var(--accent-fg) / <alpha-value>)',
         },
         success: {

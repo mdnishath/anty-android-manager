@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, session } from 'electron';
 import { join } from 'node:path';
 import log from 'electron-log/main';
-import { registerIpcHandlers } from './ipc-handlers';
+import { registerIpcHandlers, wireWindowEvents } from './ipc-handlers';
 import { sidecar } from './sidecar';
 import { startWslKeepalive, stopWslKeepalive } from './wsl-keepalive';
 
@@ -24,7 +24,7 @@ function createWindow(): void {
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     frame: process.platform === 'darwin',
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
+      preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -36,6 +36,7 @@ function createWindow(): void {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  wireWindowEvents(mainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -56,15 +57,21 @@ function createWindow(): void {
   if (devUrl) {
     void mainWindow.loadURL(devUrl);
   } else {
-    void mainWindow.loadFile(join(__dirname, '../out/renderer/index.html'));
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
 }
 
 function applyCSP(): void {
   const isDev = !app.isPackaged;
+  // Dev needs 'unsafe-inline' + 'unsafe-eval' for Vite HMR / React Fast Refresh.
+  // Prod allows 'unsafe-inline' temporarily so the FOUC theme-bootstrap inline
+  // script in index.html runs; TODO replace with a SHA-256 hash at build time.
+  const scriptSrc = isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : "script-src 'self' 'unsafe-inline'";
   const csp = [
     "default-src 'self'",
-    isDev ? "script-src 'self' 'unsafe-eval'" : "script-src 'self'",
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob:",

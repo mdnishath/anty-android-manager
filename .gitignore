@@ -7,6 +7,7 @@ dist/
 dist-electron/
 out/
 build/
+!build/icons/
 release/
 *.tsbuildinfo
 
@@ -61,3 +62,17 @@ release/
 *.AppImage
 *.deb
 *.snap
+
+# Python sidecar
+backend/.venv/
+backend/.venv-wsl/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/**/*.pyc
+.python-version
+
+# Local Claude Code worktrees / metadata
+.claude/worktrees/
+.claude/launch.json
+vite.preview.config.ts

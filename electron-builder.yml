@@ -5,8 +5,7 @@ directories:
   output: release
   buildResources: build
 files:
-  - dist-electron/**/*
-  - out/renderer/**/*
+  - out/**/*
   - package.json
 asar: true
 publish:

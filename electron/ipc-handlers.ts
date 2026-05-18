@@ -24,6 +24,8 @@ const openPathSchema = z.string().min(1);
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.sidecarUrl, () => sidecar.getUrl());
+  ipcMain.handle(IPC_CHANNELS.sidecarToken, () => sidecar.getIpcToken());
+  ipcMain.handle(IPC_CHANNELS.sidecarState, () => sidecar.getState());
 
   ipcMain.handle(IPC_CHANNELS.restartSidecar, async () => {
     await sidecar.restart();
@@ -81,6 +83,26 @@ export function registerIpcHandlers(): void {
     log.error('Renderer reported error:', parsed.data);
   });
 
+  ipcMain.handle(IPC_CHANNELS.winMinimize, (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.minimize();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.winMaximize, (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.maximize();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.winUnmaximize, (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.unmaximize();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.winClose, (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.close();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.winIsMaximized, (e) => {
+    return BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false;
+  });
+
   // Push events to all renderers
   sidecar.on('state', (state) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -93,4 +115,12 @@ export function registerIpcHandlers(): void {
       win.webContents.send(IPC_CHANNELS.settingsChangedEvent, snap);
     }
   });
+}
+
+export function wireWindowEvents(win: BrowserWindow): void {
+  const broadcastMaximized = () => {
+    win.webContents.send(IPC_CHANNELS.winMaximizedEvent, win.isMaximized());
+  };
+  win.on('maximize', broadcastMaximized);
+  win.on('unmaximize', broadcastMaximized);
 }

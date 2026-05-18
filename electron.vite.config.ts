@@ -26,8 +26,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     define: defines,
     build: {
-      outDir: 'dist-electron',
-      lib: { entry: resolve(__dirname, 'electron/main.ts') },
+      lib: {
+        entry: resolve(__dirname, 'electron/main.ts'),
+      },
     },
     resolve: {
       alias: {
@@ -36,11 +37,21 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // Don't externalize `zod` — sandboxed preloads cannot require node_modules at runtime,
+    // so anything reachable from preload.ts must be bundled.
+    plugins: [externalizeDepsPlugin({ exclude: ['zod'] })],
     define: defines,
     build: {
-      outDir: 'dist-electron',
-      lib: { entry: resolve(__dirname, 'electron/preload.ts') },
+      lib: {
+        entry: resolve(__dirname, 'electron/preload.ts'),
+        formats: ['cjs'],
+        fileName: () => 'preload.js',
+      },
+      rollupOptions: {
+        output: {
+          entryFileNames: 'preload.js',
+        },
+      },
     },
     resolve: {
       alias: {
@@ -59,7 +70,6 @@ export default defineConfig({
       },
     },
     build: {
-      outDir: 'out/renderer',
       rollupOptions: {
         input: resolve(__dirname, 'index.html'),
       },

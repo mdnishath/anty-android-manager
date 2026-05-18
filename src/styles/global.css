@@ -12,7 +12,8 @@
     --fg: 210 20% 96%;
     --fg-muted: 215 14% 70%;
     --fg-subtle: 215 12% 55%;
-    --accent: 217 91% 60%;
+    --accent: 265 83% 23%;          /* brand #310A69 */
+    --accent-strong: 265 83% 23%;   /* brand #310A69 */
     --accent-fg: 0 0% 100%;
     --success: 142 70% 45%;
     --success-bg: 142 70% 12%;
@@ -22,7 +23,7 @@
     --danger-bg: 0 72% 14%;
     --info: 199 89% 55%;
     --info-bg: 199 89% 14%;
-    --ring: 217 91% 60%;
+    --ring: 265 83% 23%;
   }
 
   html:not(.dark) {
@@ -34,7 +35,8 @@
     --fg: 222 47% 11%;
     --fg-muted: 215 16% 35%;
     --fg-subtle: 215 14% 42%;
-    --accent: 217 91% 50%;
+    --accent: 265 83% 23%;          /* brand #310A69 */
+    --accent-strong: 265 83% 23%;
     --accent-fg: 0 0% 100%;
     --success: 142 65% 30%;
     --success-bg: 142 65% 94%;
@@ -44,7 +46,7 @@
     --danger-bg: 0 70% 96%;
     --info: 199 89% 40%;
     --info-bg: 199 89% 94%;
-    --ring: 217 91% 50%;
+    --ring: 265 83% 23%;
   }
 
   * {
@@ -112,5 +114,12 @@
   }
   .no-drag {
     -webkit-app-region: no-drag;
+  }
+  /* Sidebar nav: hide scrollbar entirely so it can't shift content. */
+  .sidebar-nav {
+    scrollbar-width: none;
+  }
+  .sidebar-nav::-webkit-scrollbar {
+    display: none;
   }
 }

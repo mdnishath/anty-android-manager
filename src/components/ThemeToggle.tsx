@@ -1,4 +1,4 @@
-import { Sun, Moon, Monitor } from 'lucide-react';
+import { Sun, Moon, Laptop } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { useTheme, type Theme } from '@/theme/ThemeProvider';
@@ -13,7 +13,7 @@ const labels: Record<Theme, string> = {
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const Icon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
+  const Icon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Laptop;
 
   const cycle = () => {
     const idx = order.indexOf(theme);

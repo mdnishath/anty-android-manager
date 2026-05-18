@@ -46,24 +46,24 @@ export function TopBar() {
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-bg px-4">
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-sm">
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm">
           <span className="text-fg-subtle">CloudPhone</span>
           {title && (
             <>
-              <span className="text-fg-subtle">/</span>
-              <span className="font-medium text-fg">{title}</span>
+              <span className="text-border-strong">/</span>
+              <span className="font-semibold text-fg">{title}</span>
             </>
           )}
-        </div>
+        </nav>
       </div>
 
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hidden h-8 w-72 items-center gap-2 rounded-md border border-border bg-bg-elev px-3 text-sm text-fg-subtle transition-colors hover:border-border-strong md:flex"
+        className="hidden h-8 w-56 items-center gap-2 rounded-md border border-border bg-bg-elev px-3 text-sm text-fg-subtle transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:w-64 hover:border-border-strong md:flex"
       >
         <Search className="h-4 w-4" />
-        <span className="flex-1 text-left">Search phones, snapshots, APKs…</span>
+        <span className="flex-1 text-left">Search…</span>
         <Kbd>⌘K</Kbd>
       </button>
 

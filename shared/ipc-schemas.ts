@@ -50,12 +50,13 @@ export const appInfoSchema = z.object({
   electron: z.string(),
   chrome: z.string(),
   node: z.string(),
-  initialSettings: settingsSnapshotSchema,
 });
 export type AppInfo = z.infer<typeof appInfoSchema>;
 
 export const IPC_CHANNELS = {
   sidecarUrl: 'cp:sidecar:url',
+  sidecarToken: 'cp:sidecar:token',
+  sidecarState: 'cp:sidecar:state:get',
   sidecarStateEvent: 'cp:sidecar:state',
   restartSidecar: 'cp:sidecar:restart',
   restartApp: 'cp:app:restart',
@@ -66,4 +67,10 @@ export const IPC_CHANNELS = {
   setSetting: 'cp:settings:set',
   settingsChangedEvent: 'cp:settings:changed',
   reportError: 'cp:diagnostics:reportError',
+  winMinimize: 'cp:win:minimize',
+  winMaximize: 'cp:win:maximize',
+  winUnmaximize: 'cp:win:unmaximize',
+  winClose: 'cp:win:close',
+  winIsMaximized: 'cp:win:isMaximized',
+  winMaximizedEvent: 'cp:win:maximizedChanged',
 } as const;
