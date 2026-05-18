@@ -67,14 +67,20 @@ app = FastAPI(
     redoc_url=None,
 )
 
-if settings.cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(settings.cors_origins),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# CORS — Electron renderer fetches from `http://localhost:5173` in dev and
+# `file://` in production. Both fail the Same-Origin check, so we need permissive
+# CORS. The actual auth is the X-CP-Token header, not the Origin, so this is
+# safe enough for a token-protected local-network API.
+_cors_origins = list(settings.cors_origins) if settings.cors_origins else ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
+)
 
 app.include_router(health.router)
 app.include_router(phones.router)
