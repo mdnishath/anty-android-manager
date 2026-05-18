@@ -8,6 +8,10 @@ export const settingsSnapshotSchema = z.object({
   sidebarCollapsed: z.boolean().default(false),
   density: z.enum(['cozy', 'compact']).default('cozy'),
   sidecarPort: z.number().int().min(1024).max(65535).default(38080),
+  /** When set, Electron skips spawning a local sidecar and connects to this URL. */
+  sidecarRemoteUrl: z.string().default(''),
+  /** X-CP-Token for the remote sidecar. */
+  sidecarRemoteToken: z.string().default(''),
   defaultDockerImage: z.string().default('redroid/redroid:14.0.0_64only'),
   dataDir: z.string().default(''),
   snapshotDir: z.string().default(''),

@@ -14,6 +14,8 @@ const defaults: SettingsSnapshot = {
   sidebarCollapsed: false,
   density: 'cozy',
   sidecarPort: 38080,
+  sidecarRemoteUrl: '',
+  sidecarRemoteToken: '',
   defaultDockerImage: 'redroid/redroid:14.0.0_64only',
   dataDir: '',
   snapshotDir: '',

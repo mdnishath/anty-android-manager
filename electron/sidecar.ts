@@ -24,17 +24,24 @@ class SidecarManager extends EventEmitter {
   private process: ChildProcess | null = null;
   private ipcToken = '';
   private stopRequested = false;
+  private remoteUrl = '';
+  private remoteToken = '';
 
   getState(): SidecarState {
     return this.state;
   }
 
   getUrl(): string {
+    if (this.remoteUrl) return this.remoteUrl.replace(/\/+$/, '');
     return `http://127.0.0.1:${this.port}`;
   }
 
   getIpcToken(): string {
-    return this.ipcToken;
+    return this.remoteUrl ? this.remoteToken : this.ipcToken;
+  }
+
+  isRemote(): boolean {
+    return !!this.remoteUrl;
   }
 
   private setState(next: SidecarState): void {
@@ -52,8 +59,18 @@ class SidecarManager extends EventEmitter {
     this.stopRequested = false;
     this.setState('starting');
 
+    const settings = getAllSettings();
+    this.remoteUrl = (settings.sidecarRemoteUrl || '').trim();
+    this.remoteToken = (settings.sidecarRemoteToken || '').trim();
+
+    // Remote mode — skip local Python spawn, just probe /health.
+    if (this.remoteUrl) {
+      log.info(`[sidecar] remote mode → ${this.remoteUrl}`);
+      await this.probeRemote();
+      return;
+    }
+
     try {
-      const settings = getAllSettings();
       this.port = await pickPort(settings.sidecarPort);
       this.ipcToken = randomBytes(24).toString('hex');
 
@@ -148,7 +165,32 @@ class SidecarManager extends EventEmitter {
     await this.start();
   }
 
+  /** For remote sidecars: ping /health and flip state accordingly. */
+  private async probeRemote(): Promise<void> {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`${this.getUrl()}/health`, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.ok) {
+        this.setState('ready');
+      } else {
+        log.warn(`[sidecar] remote /health → HTTP ${res.status}`);
+        this.setState('error');
+      }
+    } catch (err) {
+      log.error('[sidecar] remote probe failed', err);
+      this.setState('error');
+    }
+  }
+
   async stop(): Promise<void> {
+    if (this.isRemote()) {
+      // Nothing to kill — the remote sidecar lives on. Just mark exited so
+      // the next start() probes again.
+      this.setState('exited');
+      return;
+    }
     if (!this.process) {
       this.setState('exited');
       return;

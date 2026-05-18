@@ -75,7 +75,9 @@ function applyCSP(): void {
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob:",
-    `connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* ${isDev ? 'ws://localhost:* http://localhost:*' : ''}`,
+    // Renderer needs to reach the sidecar (local or remote VPS) for /health,
+    // /phones etc. We're a desktop shell so allow http(s) + ws(s) outbound.
+    `connect-src 'self' http: https: ws: wss: ${isDev ? 'ws://localhost:* http://localhost:*' : ''}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'none'",
