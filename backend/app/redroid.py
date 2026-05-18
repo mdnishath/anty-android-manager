@@ -14,6 +14,7 @@ Image selection (real mode):
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass
 
@@ -64,11 +65,10 @@ def choose_image(phone: PhoneInstance, default_image: str | None = None) -> Imag
     """Pick a redroid image. `default_image` is the override from app settings.
 
     redroid tags are multi-arch (e.g. `14.0.0_64only` has both amd64 and arm64
-    manifests). The `platform` flag picks the arm64 variant under QEMU when the
-    phone's target ABI is arm64.
+    manifests). On amd64 hosts we default to the amd64 variant (native, fast)
+    even when the phone's claimed ABI is arm64 — QEMU emulation is too slow to
+    actually boot Android. Set `CP_FORCE_ARM=1` in the env to force arm64.
     """
-    # Map Android version → image tag. `_64only` = 64-bit only ABI (smaller,
-    # faster boot than the multi-ABI variant).
     version = phone.templateSnapshot.android.get("version", "14")
     base = {
         "16": "redroid/redroid:16.0.0_64only-latest",
@@ -80,8 +80,32 @@ def choose_image(phone: PhoneInstance, default_image: str | None = None) -> Imag
     }.get(str(version), "redroid/redroid:14.0.0_64only-latest")
 
     image = default_image or base
-    platform = "linux/arm64" if phone.abi == "arm64-v8a" else "linux/amd64"
+    force_arm = os.getenv("CP_FORCE_ARM") == "1"
+    if force_arm and phone.abi == "arm64-v8a":
+        platform = "linux/arm64"
+    else:
+        platform = "linux/amd64"
     return ImageChoice(image=image, platform=platform)
+
+
+def _host_cpu_count() -> int:
+    try:
+        return max(1, os.cpu_count() or 1)
+    except Exception:  # noqa: BLE001
+        return 1
+
+
+def _host_free_ram_gb() -> int:
+    """Read /proc/meminfo and return available RAM in GB (best-effort)."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    kb = int(line.split()[1])
+                    return max(1, kb // 1024 // 1024)
+    except Exception:  # noqa: BLE001
+        pass
+    return 4  # safe default
 
 
 def build_env(phone: PhoneInstance) -> dict[str, str]:
@@ -177,6 +201,12 @@ def start_container(phone: PhoneInstance, default_image: str | None = None):
         adb=host_port,
     )
 
+    # Clamp resource limits to what the host actually has so we don't 400 on
+    # `docker create`. RAM is capped to 80% of free RAM; CPUs to host count.
+    template_cores = int(phone.templateSnapshot.cpu.get("cores", 4))
+    cores = min(template_cores, _host_cpu_count())
+    ram_gb = max(1, min(phone.ramGb, _host_free_ram_gb()))
+
     kwargs: dict = {
         "image": choice.image,
         "name": name,
@@ -189,9 +219,12 @@ def start_container(phone: PhoneInstance, default_image: str | None = None):
         "environment": build_env(phone),
         "ports": {"5555/tcp": ("127.0.0.1", host_port)},
         "command": build_cmd(phone),
-        # Memory + CPU caps based on the phone's ramGb (best-effort).
-        "mem_limit": f"{phone.ramGb}g",
-        "nano_cpus": int(phone.templateSnapshot.cpu.get("cores", 4) * 1e9),
+        # Best-effort caps. Real isolation comes from cgroups + redroid's own
+        # internal limits.
+        "mem_limit": f"{ram_gb}g",
+        "nano_cpus": int(cores * 1e9),
+        # Bind-mount the host's binderfs so redroid can find /dev/binder*.
+        "volumes": {"/dev/binderfs": {"bind": "/dev/binderfs", "mode": "rw"}},
     }
     if choice.platform:
         kwargs["platform"] = choice.platform
