@@ -20,6 +20,21 @@ router = APIRouter()
 _started_at = time.monotonic()
 
 
+@router.get("/", tags=["meta"])
+async def root() -> dict:
+    """Friendly landing page so browser hits don't return raw 404 JSON."""
+    return {
+        "name": "Anty Android Manager — Sidecar",
+        "version": __version__,
+        "endpoints": {
+            "health": "/health",
+            "version": "/version",
+            "phones": "/phones (requires X-CP-Token)",
+        },
+        "hint": "Hit /health for a no-auth probe.",
+    }
+
+
 @router.get("/health", response_model=HealthResponse, tags=["meta"])
 async def health() -> HealthResponse:
     rt = probe_runtime()
